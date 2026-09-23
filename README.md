@@ -13,10 +13,14 @@ submitted upstream to ivarho/hubitatappndevice.
 
 ## Acknowledgements
 
-- [TinyTuya](https://github.com/jasonacox/tinytuya) by Jason Cox (MIT License): the protocol 3.5
-  implementation follows TinyTuya's behaviour, and TinyTuya was used to generate the 3.5 test
-  vectors in `DriverSelfTest`. It is also the recommended tool to find the device ID, local key
-  and protocol version of your bulb. No TinyTuya source code is included in this driver.
+- [TinyTuya](https://github.com/jasonacox/tinytuya) by Jason Cox (MIT License). The tuya
+  protocol 3.5 support in this driver (GCM framing, session key derivation, GCM helpers) was
+  written by Claude (Anthropic) based on, and in places directly ported from, TinyTuya's Python
+  reference implementation, and TinyTuya was used to generate the 3.5 test vectors in
+  `DriverSelfTest`. TinyTuya is also the recommended tool to find the device ID, local key and
+  protocol version of your bulb. TinyTuya's MIT license and copyright notice are included in
+  this repository at [`third_party/tinytuya/LICENSE`](third_party/tinytuya/LICENSE), as required
+  by that license.
 
 ## Changes compared to the original
 
@@ -42,4 +46,8 @@ and select the protocol version of your bulb.
 
 ## License
 
-Apache License 2.0, see [LICENSE](LICENSE).
+The driver itself is Apache License 2.0, see [LICENSE](LICENSE).
+
+Portions of the tuya protocol 3.5 support are ported from TinyTuya, which is MIT licensed;
+see [`third_party/tinytuya/LICENSE`](third_party/tinytuya/LICENSE) for the required copyright
+notice and license text.
