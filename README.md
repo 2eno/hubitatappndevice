@@ -11,6 +11,13 @@ licensed under the Apache License 2.0. This repository only packages that single
 "tuya Generic RGBW Bulb") for the Hubitat Package Manager and adds tuya protocol 3.5 support. The 3.5 changes have also been
 submitted upstream to ivarho/hubitatappndevice.
 
+## Acknowledgements
+
+- [TinyTuya](https://github.com/jasonacox/tinytuya) by Jason Cox (MIT License): the protocol 3.5
+  implementation follows TinyTuya's behaviour, and TinyTuya was used to generate the 3.5 test
+  vectors in `DriverSelfTest`. It is also the recommended tool to find the device ID, local key
+  and protocol version of your bulb. No TinyTuya source code is included in this driver.
+
 ## Changes compared to the original
 
 - tuya protocol 3.5: `00006699` frames with AES-GCM (12 byte IV, 16 byte tag, frame header as

@@ -16,6 +16,10 @@
  *  - Fixed colour parsing (hhhhssssvvvv) and a division by zero in the HSL/HSV conversion
  *  - Renamed driver from "tuya Generic RGBW Bulb" to "LEDVANCE RGBW Bulb (tuya)"
  *
+ * The protocol 3.5 implementation follows the behaviour of TinyTuya by Jason Cox
+ * (https://github.com/jasonacox/tinytuya, MIT License), which was also used to generate
+ * the 3.5 test vectors in DriverSelfTest. No TinyTuya source code is included.
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
