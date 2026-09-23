@@ -50,10 +50,10 @@ preferences {
 		input "localKey", "text", title: "Device local key:", required: true, description: "<small>The local key used  for encrypted communication between HE and the tuya Deivce. Found by using tools like tinytuya.</small>"
 		input name: "logEnable", type: "bool", title: "Enable <u>debug</u> logging", defaultValue: true, description: "<small>If issues are experienced it might help to turn on debug logging and see the debug logs, automatically turned off after 30 min. Check device IP, ID and local key make sure they are correct. Also a power off/on on the tuya device might help.</small>"
 		input name: "logTrace", type: "bool", title: "Enable driver level <u>trace</u> logging", defaultValue: true, description: "<small>For debugging scenes and automations it could be helpful to follow the program flow to make sure the correct functions are called. (Auto disabled after 30 min)</small>"
-		input "tuyaProtVersion", "enum", title: "Select tuya protocol version: ", required: true, defaultValue: 34, options: [31: "3.1", 33 : "3.3", 34: "3.4"], description: "<small>Select the correct protocol version corresponding to your device. If you run firmware update on the device you should expect the driver protocol version to update. Which protocol is used can be found using tools like tinytuya.</small>"
+		input "tuyaProtVersion", "enum", title: "Select tuya protocol version: ", required: true, defaultValue: 34, options: [31: "3.1", 33 : "3.3", 34: "3.4", 35: "3.5"], description: "<small>Select the correct protocol version corresponding to your device. If you run firmware update on the device you should expect the driver protocol version to update. Which protocol is used can be found using tools like tinytuya.</small>"
 		input name: "poll_interval", type: "enum", title: "Configure poll interval:", defaultValue: 0, options: [0: "No polling", 1:"Every 1 second", 2:"Every 2 second", 3: "Every 3 second", 5: "Every 5 second", 10: "Every 10 second", 15: "Every 15 second", 20: "Every 20 second", 30: "Every 30 second", 60: "Every 1 min", 120: "Every 2 min", 180: "Every 3 min"], description: "<small>Old way of reading status of the deivce. Use \"No polling\" when auto reconnect or heart beat is enabled.</small>"
-		input name: "autoReconnect", type: "bool", title: "Auto reconnect on socket close", defaultValue: true, description: "<small>A communication channel is kept open between HE and the tuya device. Every 30 s the socket is closed and re-opened. This is useful if the device is a switch, or is also being controlled from external apps like Smart Life etc. For <b>3.4</b> it is also smart to enable the Use heart beat method to reduce data traffic.</small>"
-		input name: "heartBeatMethod", type: "bool", title: "Use heart beat method to keep connection alive", defaultValue: true, description: "<small>Use a heart beat to keep the connection alive, i.e. a message is sent every 20 seconds to the device, the causes less data traffic on <b>3.4</b> devices as sessions don't have to be negotiated all the time.</small>"
+		input name: "autoReconnect", type: "bool", title: "Auto reconnect on socket close", defaultValue: true, description: "<small>A communication channel is kept open between HE and the tuya device. Every 30 s the socket is closed and re-opened. This is useful if the device is a switch, or is also being controlled from external apps like Smart Life etc. For <b>3.4/3.5</b> it is also smart to enable the Use heart beat method to reduce data traffic.</small>"
+		input name: "heartBeatMethod", type: "bool", title: "Use heart beat method to keep connection alive", defaultValue: true, description: "<small>Use a heart beat to keep the connection alive, i.e. a message is sent every 20 seconds to the device, the causes less data traffic on <b>3.4/3.5</b> devices as sessions don't have to be negotiated all the time.</small>"
 	}
 	section("Other") {
 		input name: "color_mode", type: "enum", title: "Configure bulb color mode:", defaultValue: "hsv", options: ["hsv": "HSV (native Hubitat)", "hsl": "HSL"]
@@ -425,26 +425,39 @@ def parse(String message) {
 
 		// Color information
 		if (status_object.dps.containsKey("24")) {
+			String colourData = status_object.dps["24"]
+
 			// Hue
-			def hueStr = status_object.dps["24"].substring(0,4)
+			def hueStr = colourData.substring(0,4)
 			Float hue_fl = Integer.parseInt(hueStr, 16)/3.6
 			Integer hue = hue_fl.round(0)
 
-			// Saturation
-			def satStr = status_object.dps["24"].substring(5,8)
-			def sat = Integer.parseInt(satStr, 16)/10
+			// Saturation (0-1000 -> 0-100)
+			def satStr = colourData.substring(4,8)
+			Integer sat = (Integer.parseInt(satStr, 16) + 5).intdiv(10)
 
-			// Level
-			def levelStr = status_object.dps["24"].substring(9,12)
-			def level = Integer.parseInt(levelStr, 16)/10
+			// Level (0-1000 -> 0-100)
+			def levelStr = colourData.substring(8,12)
+			Integer level = (Integer.parseInt(levelStr, 16) + 5).intdiv(10)
 
-			// Bug in Hubitat: Hubitat stores colors as HSV, however documents claim HSL. The tuya
-			// Ledvance bulb I have store color information in HSL, hence need to convert.
-			def colormap = hslToHsv(hue, sat, level)
+			// Read back with the same colour model that setColor() used to write, so the values
+			// shown in Hubitat match what was set.
+			def colormap
+			if (color_mode == "hsl") {
+				colormap = hslToHsv(hue, sat, level)
+			} else {
+				colormap = ["hue": hue, "saturation": sat, "value": level]
+			}
 
 			sendEvent(name: "hue", value : colormap.hue)
 			sendEvent(name: "saturation", value : colormap.saturation)
-			sendEvent(name: "level", value : colormap.value)
+
+			// The colour brightness is only the bulb level while the bulb is in colour mode,
+			// in white mode the level comes from dps 22.
+			String bulbMode = status_object.dps.containsKey("21") ? status_object.dps["21"] : (device.currentValue("colorMode") == "RGB" ? "colour" : "white")
+			if (bulbMode == "colour") {
+				sendEvent(name: "level", value : colormap.value)
+			}
 		}
 	}
 }
@@ -465,7 +478,7 @@ def hslToHsv(hue, saturation, level)
 
 	//*v = (ll + ss) / 2;
 
-	def sat = (2 * saturation) / (level + saturation)
+	def sat = (level + saturation) == 0 ? 0 : (2 * saturation) / (level + saturation)
 	//*s = (2 * ss) / (ll + ss);
 
 	def retMap = ["hue": hue, "saturation": (sat*100).intValue(), "value": (value*100).intValue()]
@@ -532,6 +545,13 @@ def socketStatus(String socketMessage) {
 	if (socketMessage == "send error: Broken pipe (Write failed)") {
 		unschedule(heartbeat)
 		socket_close()
+
+		// The connection was lost without notice (e.g. bulb switched off at the wall). Retry the
+		// pending command on a new connection, limited by the normal retry counter.
+		if (fCommand != "" && state.retry != null && state.retry > 0) {
+			state.retry = state.retry - 1
+			runInMillis(1000, sendAll)
+		}
 	}
 
 	if (socketMessage.contains('disconnect')) {
@@ -596,6 +616,7 @@ def socket_close(boolean willTryToReconnect=false) {
 	state.session_step = "step1"
 	state.HaveSession = false
 	state.sessionKey = null
+	state.rxBuffer35 = null
 
 	try {
 		interfaces.rawSocket.close()
@@ -667,6 +688,7 @@ def _updatedTuya() {
 	state.session_step = "step1"
 	state.retry = 5
 	state.Msgseq = 1
+	state.rxBuffer35 = null
 }
 
 def DriverSelfTestReport(testName, byte[] generated, String expected) {
@@ -773,10 +795,53 @@ def DriverSelfTest() {
 
 	decodeIncomingFrame(data, 0, testKey, {status ->
 		DriverSelfTestReport("DecodingIncomingFrameV3_4", status.inspect(), expected.inspect())
+	}, "34")
+
+	// ------------------------- Protocol 3.5 (test vectors generated with tinytuya 1.20) -------------------------
+	byte[] key35 = "7ae83ffe1980sa3c".getBytes("UTF-8")
+	byte[] iv35 = "0123456789ab".getBytes("UTF-8")
+
+	// Testing AES-GCM implementation
+	expected = "77E34819E1110C756550403BB8424B9C175E5DC2AFFA48D7D127277A967A8DFF021A2B"
+	generatedTestVector = gcmEncrypt(key35, iv35, hubitat.helper.HexUtils.hexStringToByteArray("0000000000010000000d0000002f"), '{"dps":{"20":true}}'.getBytes("UTF-8"))
+	DriverSelfTestReport("AesGcmV3_5", generatedTestVector, expected)
+
+	// Testing 3.5 set message
+	expected = "000066990000000000000000000D000000633031323334353637383961623FEF19699233360E476270198236399250535250980CBD56133D1A53A6FD3C88D99716E2AB5C694F39240B8A5F7EC8656A078894E184C8A6C4929939C9DEFA7ED22873B664702443CB7104115F512A72CFE483C1687FA600009966"
+	generatedTestVector = generate_payload("set", ["20": true], "1702671803", key35, "bfd733c97d1bfc88b3sysa", "35", 0 as Short, iv35)
+	DriverSelfTestReport("SetMessageV3_5", generatedTestVector, expected)
+
+	// Testing 3.5 status message
+	expected = "00006699000000000000000000100000001E30313233343536373839616277BC68DAE3C885105F56802F612F1C37CAB800009966"
+	generatedTestVector = generate_payload("status", null, "1702671803", key35, "bfd733c97d1bfc88b3sysa", "35", 0 as Short, iv35)
+	DriverSelfTestReport("StatusMessageV3_5", generatedTestVector, expected)
+
+	// Testing 3.5 session key request (1st)
+	expected = "00006699000000000001000000030000002C3031323334353637383961623CF01E5AA60600397F5B117BE1525C8FA6878BDDA4F1C0FE46808C7876FA815B00009966"
+	generatedTestVector = generateKeyStartMessageV3_5('0123456789abcdef', key35, 1 as Short, iv35)
+	DriverSelfTestReport("GenerateSessionKeyReqStep1V3_5", generatedTestVector, expected)
+
+	// Testing 3.5 session key calculation
+	expected = "0FC87F6FC535310B4E6D281A826A6DED"
+	generatedTestVector = calculateSessionKeyV3_5('0123456789abcdef'.getBytes("UTF-8"), '38a5c312169ac81b'.getBytes("UTF-8"), key35)
+	DriverSelfTestReport("GenerateSessionKeyV3_5", generatedTestVector, expected)
+
+	// Testing decoding of incoming 3.5 frame (return code + version header + data wrapped dps)
+	expected = ["dps":["20":true, "21":"colour", "24":"00b403e80320"]]
+	byte[] data35 = hubitat.helper.HexUtils.hexStringToByteArray("000066990000000000050000000800000089626139383736353433323130F85EC1B4D89058A1FBC92E69115F8D385B53966FD937AD126A3DE255796C057B474E0B0339CD32F5E922DE1EC12C96189CA6D81E408C5D67C1B63E89E0D6BB000CBB72090155DEC041CD9B098B5A9366F876118F20987FE1B629ED47F76FEFFBE89F628D9E611261888B86D8C2ADF9F7191D33F8678772E2C6E4D6F93A00009966")
+	byte[] testKey35 = hubitat.helper.HexUtils.hexStringToByteArray("0FC87F6FC535310B4E6D281A826A6DED")
+
+	boolean decoded35 = false
+	decodeIncomingFrameV3_5(data35, testKey35, {status ->
+		decoded35 = true
+		DriverSelfTestReport("DecodingIncomingFrameV3_5", status.inspect(), expected.inspect())
 	})
+	if (!decoded35) {
+		DriverSelfTestReport("DecodingIncomingFrameV3_5", "not decoded", expected.inspect())
+	}
 
 	// Clean-up after self-test
-	tuyaDeviceUpdate()
+	_updatedTuya()
 }
 
 def DriverSelfTestCallback(def status) {
@@ -801,11 +866,16 @@ def getFrameTypeId(String name) {
 @Field static Map frameChecksumSize = [
 	"31": 4,
 	"33": 4,
-	"34": 32
+	"34": 32,
+	"35": 16
 ]
 
 List _parseTuya(String message) {
 	if(logEnable) log.debug "Using new parser on message: " + message
+
+	if (settings.tuyaProtVersion == "35") {
+		return _parseTuya35(message)
+	}
 
 	unschedule(sendTimeout)
 
@@ -855,7 +925,10 @@ List _parseTuya(String message) {
 	return results
 }
 
-Map decodeIncomingFrame(byte[] incomingData, Integer sofIndex=0, byte[] testKey=null, Closure callback=null) {
+Map decodeIncomingFrame(byte[] incomingData, Integer sofIndex=0, byte[] testKey=null, Closure callback=null, String protVersion=null) {
+	// Protocol version can be given explicitly (used by the self test), default is the device setting
+	if (protVersion == null) protVersion = settings.tuyaProtVersion
+
 	long frameSequence = Byte.toUnsignedLong(incomingData[sofIndex + 7]) + (Byte.toUnsignedLong(incomingData[sofIndex + 8]) << 8)
 	def frameType = Byte.toUnsignedInt(incomingData[sofIndex + 11])
 	Integer frameLength = Byte.toUnsignedInt(incomingData[sofIndex + 15])
@@ -878,7 +951,7 @@ Map decodeIncomingFrame(byte[] incomingData, Integer sofIndex=0, byte[] testKey=
 	}
 
 	// Need to know checksum sizes
-	Integer checksumSize = frameChecksumSize[settings.tuyaProtVersion]
+	Integer checksumSize = frameChecksumSize[protVersion]
 	Integer payloadStart = 20
 	Integer payloadLength = 16
 
@@ -898,13 +971,13 @@ Map decodeIncomingFrame(byte[] incomingData, Integer sofIndex=0, byte[] testKey=
 		case "STATUS_RESP":
 			// Response to setting request
 			fCommand = ""
-			if (settings.tuyaProtVersion == "31") {
+			if (protVersion == "31") {
 				payloadStart = 23 + 16 // 16 bytes to MD5 sum
 				payloadLength = frameLength - checksumSize - 27
-			} else if (settings.tuyaProtVersion == "33") {
+			} else if (protVersion == "33") {
 				payloadStart = 35
 				payloadLength = frameLength - checksumSize - 4 - 19
-			} else if (settings.tuyaProtVersion == "34") {
+			} else if (protVersion == "34") {
 				payloadStart = 20
 				payloadLength = frameLength - checksumSize - 4 - 4
 			}
@@ -936,7 +1009,7 @@ Map decodeIncomingFrame(byte[] incomingData, Integer sofIndex=0, byte[] testKey=
 		if (logEnable) log.debug "Unencrypted message: $plainTextMessage"
 	} else {
 		// Incoming data is encrypted
-		plainTextMessage = decryptPayload(incomingData as byte[], useKey, sofIndex + payloadStart, payloadLength)
+		plainTextMessage = decryptPayload(incomingData as byte[], useKey, sofIndex + payloadStart, payloadLength, protVersion)
 		if(logEnable) log.debug "Decrypted message: " + plainTextMessage
 	}
 
@@ -984,7 +1057,7 @@ Map decodeIncomingFrame(byte[] incomingData, Integer sofIndex=0, byte[] testKey=
 			// Response to setting request
 
 			// Protocol 3.4 buries the dps info one level deeper
-			if (settings.tuyaProtVersion == "34") {
+			if (protVersion == "34") {
 				status = status["data"]
 			}
 			break
@@ -1009,7 +1082,9 @@ Map decodeIncomingFrame(byte[] incomingData, Integer sofIndex=0, byte[] testKey=
 	return status
 }
 
-def decryptPayload(byte[] data, byte[] key, start, length) {
+def decryptPayload(byte[] data, byte[] key, start, length, String protVersion=null) {
+	if (protVersion == null) protVersion = settings.tuyaProtVersion
+
 	ByteArrayOutputStream payloadStream = new ByteArrayOutputStream()
 
 	for (i = 0; i < length; i++) {
@@ -1021,7 +1096,7 @@ def decryptPayload(byte[] data, byte[] key, start, length) {
 	if(logEnable) log.debug "Payload for decrypt [$start..$length]: " + hubitat.helper.HexUtils.byteArrayToHexString(payloadByteArray)
 
 	// Protocol version 3.1 uses base64 conversion
-	boolean useB64 = settings.tuyaProtVersion == "31" ? true : false
+	boolean useB64 = protVersion == "31" ? true : false
 
 	return decrypt_bytes(payloadByteArray, key, useB64)
 }
@@ -1084,7 +1159,7 @@ def heartbeat() {
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec;
 
-def generate_payload(String command, def data=null, String timestamp=null, byte[] localkey=getRealLocalKey(), String devid=settings.devId, String tuyaVersion=settings.tuyaProtVersion, Short useMsgSequence=null) {
+def generate_payload(String command, def data=null, String timestamp=null, byte[] localkey=getRealLocalKey(), String devid=settings.devId, String tuyaVersion=settings.tuyaProtVersion, Short useMsgSequence=null, byte[] useIv=null) {
 
 	switch (tuyaVersion) {
 		case "31":
@@ -1092,6 +1167,8 @@ def generate_payload(String command, def data=null, String timestamp=null, byte[
 			payloadFormat = "v3.1_v3.3"
 			break
 		case "34":
+		case "35":
+			// 3.5 uses the same commands and JSON as 3.4, only the framing/encryption differs
 			payloadFormat = "v3.4"
 			break
 	}
@@ -1122,6 +1199,11 @@ def generate_payload(String command, def data=null, String timestamp=null, byte[
 		} else {
 			json_data["t"] = timestamp
 		}
+
+		// 3.5 devices get the timestamp as a number (same as tinytuya)
+		if (tuyaVersion == "35") {
+			json_data["t"] = json_data["t"].toString().toLong()
+		}
 	}
 
 	if (data != null && data != [:]) {
@@ -1140,6 +1222,21 @@ def generate_payload(String command, def data=null, String timestamp=null, byte[
 	json_payload = json_payload[0..-2]
 
 	if (logEnable) log.debug "payload before=" + json_payload
+
+	if (tuyaVersion == "35") {
+		// Protocol 3.5: [version header, only for set] + JSON, encrypted with AES-GCM in a 6699 frame
+		ByteArrayOutputStream plain35 = new ByteArrayOutputStream()
+		if (command != "status" && command != "hb") {
+			plain35.write("3.5".getBytes("UTF-8"))
+			plain35.write(new byte[12])
+		}
+		plain35.write(json_payload.getBytes("UTF-8"))
+
+		Short msgSequence35 = useMsgSequence==null ? getNewMessageSequence() : useMsgSequence
+		int cmd35 = Integer.parseInt(payload()[payloadFormat][command]["hexByte"], 16)
+
+		return packFrameV3_5(cmd35, plain35.toByteArray(), localkey as byte[], msgSequence35 & 0xFFFF, useIv)
+	}
 
 	// Contruct payload, sometimes encrypted, sometimes clear text, and a mix. Depending on the protocol version
 	ByteArrayOutputStream contructed_payload = new ByteArrayOutputStream()
@@ -1273,7 +1370,11 @@ def get_session(tuyaVersion) {
 		case "step1":
 			socket_connect()
 			state.session_step = "step2"
-			socket_write(generateKeyStartMessage())
+			if (tuyaVersion.toString() == "35") {
+				socket_write(generateKeyStartMessageV3_5())
+			} else {
+				socket_write(generateKeyStartMessage())
+			}
 			runInMillis(750, get_session_timeout)
 			break
 		case "final":
@@ -1520,4 +1621,490 @@ def CRC32b(bytes, length) {
 	}
 
 	return ~crc
+}
+
+// **************************************************************************************************
+// **************************************************************************************************
+// *************************** TUYA PROTOCOL 3.5 (6699 frames, AES-GCM) *****************************
+// **************************************************************************************************
+// **************************************************************************************************
+//
+// Frame layout, all integers big-endian:
+//   00006699 | 0000 | seq (4) | cmd (4) | len (4) | IV (12) | ciphertext | GCM tag (16) | 00009966
+//   "len" counts IV + ciphertext + tag. The 14 bytes between prefix and IV are the GCM AAD.
+//
+// Plaintext hub -> device:  ["3.5" + 12 zero bytes, only for CONTROL_NEW] JSON
+// Plaintext device -> hub:  [retcode (4)] ["3.5" + 12 byte header] JSON
+//
+// Session negotiation is the same 3-step exchange as 3.4, but every message is a 6699 frame
+// encrypted with the real local key, and the session key is derived with AES-GCM:
+//   sessionKey = GCM-ciphertext( key = localKey, iv = localNonce[0..11], data = localNonce XOR remoteNonce )
+//
+// AES-GCM is built from AES/ECB/NoPadding (CTR keystream + GHASH), so only crypto classes that
+// the 3.4 implementation already uses are needed (no GCMParameterSpec).
+
+@Field static final long GCM_R = 0xE1L << 56
+
+List _parseTuya35(String message) {
+	unschedule(sendTimeout)
+
+	state.retry = 5
+
+	// Frames can be split over several socket reads, keep incomplete data until the next read
+	String buffer = (state.rxBuffer35 ?: "") + message.toUpperCase()
+	state.rxBuffer35 = null
+
+	List results = []
+	int position = 0
+	int loopGuard = 50
+
+	while (loopGuard > 0) {
+		loopGuard = loopGuard - 1
+
+		int index = buffer.indexOf("00006699", position)
+		// Only accept frame starts on byte boundaries
+		while (index != -1 && (index % 2) != 0) {
+			index = buffer.indexOf("00006699", index + 1)
+		}
+
+		if (index == -1) {
+			break
+		}
+
+		// Header is 18 bytes = 36 hex characters
+		if (buffer.length() - index < 36) {
+			state.rxBuffer35 = buffer.substring(index)
+			break
+		}
+
+		long frameLength = Long.parseLong(buffer.substring(index + 28, index + 36), 16)
+
+		if (frameLength < 28 || frameLength > 8192) {
+			if (logEnable) log.debug "Ignoring invalid 3.5 frame length $frameLength at $index"
+			position = index + 8
+			continue
+		}
+
+		int frameHexLength = (int) ((18 + frameLength + 4) * 2)
+
+		if (buffer.length() - index < frameHexLength) {
+			// Not all data received yet
+			if (buffer.length() - index < 20000) {
+				state.rxBuffer35 = buffer.substring(index)
+			}
+			break
+		}
+
+		byte[] frame = hubitat.helper.HexUtils.hexStringToByteArray(buffer.substring(index, index + frameHexLength))
+
+		Map result = decodeIncomingFrameV3_5(frame)
+
+		if (result != null && result.dps instanceof Map) {
+			results.add(result)
+		}
+
+		position = index + frameHexLength
+	}
+
+	return results
+}
+
+Map decodeIncomingFrameV3_5(byte[] frame, byte[] testKey=null, Closure callback=null) {
+	long frameSequence = readUInt32(frame, 6)
+	int frameType = (int) readUInt32(frame, 10)
+	int frameLength = (int) readUInt32(frame, 14)
+	String frameName = frameTypes[frameType]
+
+	if(logEnable) log.debug("3.5 frame with sequence: $frameSequence, message type: $frameType (${frameName ?: 'unknown'}), length: $frameLength")
+
+	if (frameName == null) {
+		log.warn "Unknown frame type, key: $frameType"
+		return null
+	}
+
+	if (frameLength < 28 || frame.length < 18 + frameLength + 4) {
+		log.warn "Incomplete 3.5 frame, dropped"
+		return null
+	}
+
+	byte[] useKey
+	if (testKey != null) {
+		useKey = testKey
+	} else if (frameName == "KEY_RESP" || state.sessionKey == null) {
+		useKey = getRealLocalKey()
+	} else {
+		useKey = state.sessionKey as byte[]
+	}
+
+	int cipherLength = frameLength - 12 - 16
+	byte[] aad = bytesSlice(frame, 4, 14)
+	byte[] iv = bytesSlice(frame, 18, 12)
+	byte[] cipherText = bytesSlice(frame, 30, cipherLength)
+	byte[] tag = bytesSlice(frame, 30 + cipherLength, 16)
+
+	byte[] plain = gcmDecrypt(useKey, iv, aad, cipherText, tag)
+
+	if (plain == null) {
+		if (frameName == "KEY_RESP") {
+			log.error "Protocol 3.5: could not decrypt the session key answer from the device. The local key is most likely wrong, it changes every time the bulb is paired in the app."
+			unschedule(get_session_timeout)
+			socket_close()
+		} else {
+			log.error "Protocol 3.5: dropped a message that failed the AES-GCM check (type $frameType). If this repeats, check the local key or use Disconnect to force a new session."
+		}
+		return null
+	}
+
+	if(logEnable) log.debug "Decrypted 3.5 payload: " + hubitat.helper.HexUtils.byteArrayToHexString(plain)
+
+	// Strip return code (4 bytes) and version header ("3.5" + 12 bytes) if present
+	int payloadStart = 0
+	Long returnCode = null
+
+	if (frameName == "KEY_RESP") {
+		if (plain.length >= 52) {
+			returnCode = readUInt32(plain, 0)
+			payloadStart = 4
+		}
+	} else if (plain.length >= 4 && plain[0] != 0x7B && !isVersionHeaderV3_5(plain, 0)) {
+		returnCode = readUInt32(plain, 0)
+		payloadStart = 4
+	}
+
+	if (returnCode != null && returnCode != 0) {
+		log.warn "Device answered $frameName with return code $returnCode"
+	}
+
+	if (frameName != "KEY_RESP" && isVersionHeaderV3_5(plain, payloadStart) && plain.length >= payloadStart + 15) {
+		payloadStart = payloadStart + 15
+	}
+
+	byte[] body = bytesSlice(plain, payloadStart, plain.length - payloadStart)
+
+	if (frameName == "KEY_RESP") {
+		unschedule(get_session_timeout)
+
+		if (body.length < 48) {
+			log.error "Protocol 3.5: session key answer from device is too short (${body.length} bytes)"
+			socket_close()
+			return null
+		}
+
+		byte[] realKey = getRealLocalKey()
+		byte[] localNonce = getLocalNonce().getBytes("UTF-8")
+		byte[] remoteNonce = bytesSlice(body, 0, 16)
+
+		if (!bytesEqual(hmacSha256(realKey, localNonce), bytesSlice(body, 16, 32))) {
+			log.error "Protocol 3.5: session key answer from device has a wrong HMAC, check the local key"
+			socket_close()
+			return null
+		}
+
+		state.session_step = "step3"
+		socket_write(packFrameV3_5(getFrameTypeId("KEY_FINAL"), hmacSha256(realKey, remoteNonce), realKey, getNewMessageSequence() & 0xFFFF))
+
+		state.sessionKey = calculateSessionKeyV3_5(localNonce, remoteNonce, realKey)
+		state.session_step = "final"
+		state.HaveSession = true
+
+		if(logEnable) log.debug "Session key (3.5): " + hubitat.helper.HexUtils.byteArrayToHexString(state.sessionKey as byte[])
+		if(logEnable) log.debug "********************** DONE  SESSION KEY NEGOTIATION (3.5) **********************"
+
+		sendEvent(name: "presence", value: "present")
+
+		// Time to send actual message
+		runInMillis(100, sendAll)
+
+		if (heartBeatMethod) {
+			runIn(20, heartbeat)
+		} else {
+			runIn(30, socketStatus, [data: "disconnect: pipe closed (driver forced - expected behaviour)"])
+		}
+
+		return null
+	}
+
+	Map status = [:]
+
+	String plainTextMessage = new String(body, "UTF-8")
+	if(logEnable) log.debug "Decrypted message: " + plainTextMessage
+
+	int jsonStart = plainTextMessage.indexOf('{')
+	if (jsonStart != -1) {
+		try {
+			def jsonSlurper = new groovy.json.JsonSlurper()
+			def parsed = jsonSlurper.parseText(plainTextMessage.substring(jsonStart))
+			if (parsed instanceof Map) {
+				status = parsed
+			}
+		} catch (e) {
+			log.warn "Could not parse message from device: $plainTextMessage"
+		}
+	}
+
+	// 3.4/3.5 devices often wrap the dps in a "data" object
+	if (!status.containsKey("dps") && status.data instanceof Map && status.data.containsKey("dps")) {
+		status = status.data
+	}
+
+	switch (frameName) {
+		case "CONTROL":
+		case "CONTROL_NEW":
+			// Device acknowledged the set command, new values arrive in a STATUS_RESP message
+			if (returnCode == null || returnCode == 0) {
+				fCommand = ""
+			}
+			return null
+		case "STATUS_RESP":
+		case "DP_QUERY":
+		case "DP_QUERY_NEW":
+			fCommand = ""
+			break
+		case "HEART_BEAT":
+			fCommand = ""
+			unschedule(socketStatus)
+			runIn(18, heartbeat)
+			break
+	}
+
+	if(logEnable) log.debug "DPS object: " + status
+
+	if (callback != null) {
+		callback(status)
+	}
+
+	if (status.dps != null) {
+		sendEvent(name: "rawMessage", value: status.dps)
+	}
+
+	return status
+}
+
+byte[] generateKeyStartMessageV3_5(String useLocalNonce=null, byte[] useKey=getRealLocalKey(), Short useMsgSequence=null, byte[] useIv=null) {
+	if (logEnable) log.debug("********************** START SESSION KEY NEGOTIATION (3.5) **********************")
+
+	String nonce = useLocalNonce
+	if (nonce == null) {
+		// New nonce for every negotiation, it is also the IV for the session key derivation
+		nonce = generateLocalNonce()
+		state.LocalNonce = nonce
+	}
+
+	if (logEnable) log.debug "Payload (local nonce): $nonce"
+
+	Short msgSequence = useMsgSequence==null ? getNewMessageSequence() : useMsgSequence
+
+	return packFrameV3_5(getFrameTypeId("KEY_START"), nonce.getBytes("UTF-8"), useKey, msgSequence & 0xFFFF, useIv)
+}
+
+byte[] calculateSessionKeyV3_5(byte[] localNonce, byte[] remoteNonce, byte[] key=getRealLocalKey()) {
+	byte[] xored = new byte[16]
+	for (int i = 0; i < 16; i++) {
+		xored[i] = (byte) (localNonce[i] ^ remoteNonce[i])
+	}
+
+	// Equals the ciphertext of AES-GCM(key, iv = localNonce[0..11]) over the XOR'ed nonces
+	return gcmCtr(key, bytesSlice(localNonce, 0, 12), xored)
+}
+
+byte[] packFrameV3_5(int cmd, byte[] plainText, byte[] key, long sequence, byte[] useIv=null) {
+	byte[] iv = useIv == null ? gcmRandomIv() : useIv
+
+	ByteArrayOutputStream header = new ByteArrayOutputStream()
+	header.write(hubitat.helper.HexUtils.hexStringToByteArray("000066990000"))
+	writeUInt32(header, sequence)
+	writeUInt32(header, cmd)
+	writeUInt32(header, 12 + plainText.length + 16)
+	byte[] headerBytes = header.toByteArray()
+
+	byte[] encrypted = gcmEncrypt(key, iv, bytesSlice(headerBytes, 4, 14), plainText)
+
+	ByteArrayOutputStream frame = new ByteArrayOutputStream()
+	frame.write(headerBytes)
+	frame.write(iv)
+	frame.write(encrypted)
+	frame.write(hubitat.helper.HexUtils.hexStringToByteArray("00009966"))
+
+	if (logEnable) log.debug "3.5 frame: " + hubitat.helper.HexUtils.byteArrayToHexString(frame.toByteArray())
+
+	return frame.toByteArray()
+}
+
+boolean isVersionHeaderV3_5(byte[] data, int offset) {
+	// "3.5"
+	return data.length >= offset + 3 && data[offset] == 0x33 && data[offset + 1] == 0x2E && data[offset + 2] == 0x35
+}
+
+byte[] gcmRandomIv() {
+	byte[] iv = new byte[12]
+	new Random().nextBytes(iv)
+	return iv
+}
+
+// ---------------------------------------- AES-GCM ----------------------------------------------
+
+byte[] gcmEncrypt(byte[] key, byte[] iv, byte[] aad, byte[] plainText) {
+	byte[] cipherText = gcmCtr(key, iv, plainText)
+	byte[] tag = gcmTag(key, iv, aad, cipherText)
+
+	ByteArrayOutputStream out = new ByteArrayOutputStream()
+	out.write(cipherText)
+	out.write(tag)
+	return out.toByteArray()
+}
+
+// Returns null if the authentication tag does not match
+byte[] gcmDecrypt(byte[] key, byte[] iv, byte[] aad, byte[] cipherText, byte[] tag) {
+	if (!bytesEqual(gcmTag(key, iv, aad, cipherText), tag)) {
+		return null
+	}
+	return gcmCtr(key, iv, cipherText)
+}
+
+// CTR mode as used by GCM with a 12 byte IV: the first counter block is IV || 00000002
+byte[] gcmCtr(byte[] key, byte[] iv, byte[] data) {
+	if (data.length == 0) {
+		return new byte[0]
+	}
+
+	int blocks = (data.length + 15).intdiv(16)
+	byte[] counters = new byte[blocks * 16]
+
+	for (int b = 0; b < blocks; b++) {
+		for (int i = 0; i < 12; i++) {
+			counters[b * 16 + i] = iv[i]
+		}
+		long counter = 2L + b
+		counters[b * 16 + 12] = (byte) ((counter >> 24) & 0xFF)
+		counters[b * 16 + 13] = (byte) ((counter >> 16) & 0xFF)
+		counters[b * 16 + 14] = (byte) ((counter >> 8) & 0xFF)
+		counters[b * 16 + 15] = (byte) (counter & 0xFF)
+	}
+
+	byte[] keyStream = aesEcbEncryptRaw(key, counters)
+
+	byte[] out = new byte[data.length]
+	for (int i = 0; i < data.length; i++) {
+		out[i] = (byte) (data[i] ^ keyStream[i])
+	}
+	return out
+}
+
+byte[] gcmTag(byte[] key, byte[] iv, byte[] aad, byte[] cipherText) {
+	byte[] h = aesEcbEncryptRaw(key, new byte[16])
+	long hHi = bytesToLong(h, 0)
+	long hLo = bytesToLong(h, 8)
+
+	long[] y = new long[2]
+	ghashUpdate(y, hHi, hLo, aad)
+	ghashUpdate(y, hHi, hLo, cipherText)
+
+	// Length block: bit lengths of AAD and ciphertext
+	long[] r = gfMul(y[0] ^ ((long) aad.length * 8L), y[1] ^ ((long) cipherText.length * 8L), hHi, hLo)
+
+	byte[] j0 = new byte[16]
+	for (int i = 0; i < 12; i++) {
+		j0[i] = iv[i]
+	}
+	j0[15] = (byte) 1
+	byte[] ekj0 = aesEcbEncryptRaw(key, j0)
+
+	byte[] tag = new byte[16]
+	for (int i = 0; i < 8; i++) {
+		tag[i] = (byte) (ekj0[i] ^ ((r[0] >>> (56 - 8 * i)) & 0xFF))
+		tag[8 + i] = (byte) (ekj0[8 + i] ^ ((r[1] >>> (56 - 8 * i)) & 0xFF))
+	}
+	return tag
+}
+
+void ghashUpdate(long[] y, long hHi, long hLo, byte[] data) {
+	for (int offset = 0; offset < data.length; offset += 16) {
+		byte[] block = new byte[16]
+		int n = Math.min(16, data.length - offset)
+		for (int i = 0; i < n; i++) {
+			block[i] = data[offset + i]
+		}
+		long[] r = gfMul(y[0] ^ bytesToLong(block, 0), y[1] ^ bytesToLong(block, 8), hHi, hLo)
+		y[0] = r[0]
+		y[1] = r[1]
+	}
+}
+
+// Multiplication in GF(2^128) as defined for GCM (bit reflected, R = 0xE1 || 0^120)
+long[] gfMul(long xHi, long xLo, long hHi, long hLo) {
+	long zHi = 0L
+	long zLo = 0L
+	long vHi = hHi
+	long vLo = hLo
+
+	for (int i = 0; i < 128; i++) {
+		long bit = (i < 64) ? ((xHi >>> (63 - i)) & 1L) : ((xLo >>> (127 - i)) & 1L)
+		if (bit != 0L) {
+			zHi = zHi ^ vHi
+			zLo = zLo ^ vLo
+		}
+		boolean carry = (vLo & 1L) != 0L
+		vLo = (vLo >>> 1) | (vHi << 63)
+		vHi = vHi >>> 1
+		if (carry) {
+			vHi = vHi ^ GCM_R
+		}
+	}
+
+	long[] result = new long[2]
+	result[0] = zHi
+	result[1] = zLo
+	return result
+}
+
+byte[] aesEcbEncryptRaw(byte[] key, byte[] data) {
+	def cipher = Cipher.getInstance("AES/ECB/NoPadding")
+	cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(key, "AES"))
+	return cipher.doFinal(data)
+}
+
+// ---------------------------------------- Helpers ----------------------------------------------
+
+byte[] hmacSha256(byte[] key, byte[] data) {
+	Mac sha256HMAC = Mac.getInstance("HmacSHA256")
+	sha256HMAC.init(new SecretKeySpec(key, "HmacSHA256"))
+	return sha256HMAC.doFinal(data)
+}
+
+boolean bytesEqual(byte[] a, byte[] b) {
+	if (a == null || b == null || a.length != b.length) {
+		return false
+	}
+	int diff = 0
+	for (int i = 0; i < a.length; i++) {
+		diff = diff | (a[i] ^ b[i])
+	}
+	return diff == 0
+}
+
+byte[] bytesSlice(byte[] source, int offset, int length) {
+	byte[] out = new byte[length]
+	for (int i = 0; i < length; i++) {
+		out[i] = source[offset + i]
+	}
+	return out
+}
+
+long bytesToLong(byte[] data, int offset) {
+	long value = 0L
+	for (int i = 0; i < 8; i++) {
+		value = (value << 8) | (data[offset + i] & 0xFFL)
+	}
+	return value
+}
+
+long readUInt32(byte[] data, int offset) {
+	return ((data[offset] & 0xFFL) << 24) | ((data[offset + 1] & 0xFFL) << 16) | ((data[offset + 2] & 0xFFL) << 8) | (data[offset + 3] & 0xFFL)
+}
+
+void writeUInt32(ByteArrayOutputStream out, long value) {
+	out.write((int) ((value >> 24) & 0xFF))
+	out.write((int) ((value >> 16) & 0xFF))
+	out.write((int) ((value >> 8) & 0xFF))
+	out.write((int) (value & 0xFF))
 }

@@ -63,6 +63,15 @@ In addition protocol version 3.4 implements a session concept where HE has to se
 
 The 3.4 version has been tested with a RGBW bulb. If you have feedback on the other drivers please reach out.
 
+### Version 3.5 Protocol
+Version 3.5 replaces the ```000055AA``` frame with a ```00006699``` frame and uses AES-GCM instead of AES-ECB + HMAC. Every message carries its own 12 byte IV and a 16 byte authentication tag, the frame header is authenticated as additional data:
+
+```00006699 | 0000 | sequence (4) | command (4) | length (4) | IV (12) | encrypted payload | tag (16) | 00009966```
+
+Session negotiation uses the same three messages as 3.4, but they are sent as ```00006699``` frames encrypted with the local key, and the session key is derived with AES-GCM (IV = first 12 bytes of the local nonce). Messages from the device start with a 4 byte return code inside the encrypted payload.
+
+AES-GCM is implemented in the driver on top of AES/ECB, so no additional crypto classes are needed on the hub. Protocol 3.5 is supported by the tuya Generic RGBW Bulb driver and has been tested with a LEDVANCE SMART+ WiFi Filament Edison RGBW bulb.
+
 ***
 
 ## tuya Wifi Siren
