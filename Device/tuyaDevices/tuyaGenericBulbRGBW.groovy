@@ -1,5 +1,5 @@
 /**
- * IMPORT URL: https://raw.githubusercontent.com/2eno/hubitat-tuya-rgbw-bulb/main/Device/tuyaDevices/tuyaGenericBulbRGBW.groovy
+ * IMPORT URL: https://raw.githubusercontent.com/2eno/hubitat-ledvance-rgbw-bulb/main/Device/tuyaDevices/tuyaGenericBulbRGBW.groovy
  *
  * Copyright 2023-2024 Ivar Holand
  *
@@ -14,6 +14,7 @@
  *  - Receive buffering for 3.5 frames split across socket messages
  *  - 3.5 test vectors (generated with tinytuya) added to DriverSelfTest
  *  - Fixed colour parsing (hhhhssssvvvv) and a division by zero in the HSL/HSV conversion
+ *  - Renamed driver from "tuya Generic RGBW Bulb" to "LEDVANCE RGBW Bulb (tuya)"
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,10 +29,10 @@
  * limitations under the License.
  */
 metadata {
-	definition(name: "tuya Generic RGBW Bulb",
+	definition(name: "LEDVANCE RGBW Bulb (tuya)",
 			namespace: "iholand",
 			author: "iholand",
-			importUrl: "https://raw.githubusercontent.com/2eno/hubitat-tuya-rgbw-bulb/main/Device/tuyaDevices/tuyaGenericBulbRGBW.groovy",
+			importUrl: "https://raw.githubusercontent.com/2eno/hubitat-ledvance-rgbw-bulb/main/Device/tuyaDevices/tuyaGenericBulbRGBW.groovy",
 			singleThreaded: true) {
 		capability "Actuator"
 		capability "Bulb"
