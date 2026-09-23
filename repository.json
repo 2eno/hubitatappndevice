@@ -1,0 +1,17 @@
+{
+	"author": "2eno",
+	"gitHubUrl": "https://github.com/2eno",
+	"packages": [
+		{
+			"id": "3bc65ae8-5f41-4881-aa90-3c0615df0cd9",
+			"name": "tuya Generic RGBW Bulb (protocol 3.5)",
+			"category": "Integrations",
+			"location": "https://raw.githubusercontent.com/2eno/hubitat-tuya-rgbw-bulb/main/packageManifest.json",
+			"description": "Local LAN driver for tuya RGBW bulbs (protocol 3.1/3.3/3.4/3.5), based on ivarho/hubitatappndevice, Tuya protocol 3.5 support added.",
+			"tags": [
+				"Lights & Switches",
+				"LAN"
+			]
+		}
+	]
+}

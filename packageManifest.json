@@ -1,0 +1,19 @@
+{
+	"packageName": "tuya Generic RGBW Bulb (protocol 3.5)",
+	"author": "2eno (based on work by Ivar Holand)",
+	"version": "1.0.0",
+	"minimumHEVersion": "2.3.0",
+	"dateReleased": "2026-09-23",
+	"licenseFile": "https://raw.githubusercontent.com/2eno/hubitat-tuya-rgbw-bulb/main/LICENSE",
+	"documentationLink": "https://github.com/2eno/hubitat-tuya-rgbw-bulb/blob/main/README.md",
+	"releaseNotes": "1.0.0: First standalone release, based on ivarho/hubitatappndevice. Adds tuya protocol 3.5 support (6699 frames, AES-GCM) to the local LAN RGBW bulb driver.",
+	"drivers": [
+		{
+			"id": "923feebd-b789-4e3b-b568-b4835217b3ba",
+			"name": "tuya Generic RGBW Bulb",
+			"namespace": "iholand",
+			"location": "https://raw.githubusercontent.com/2eno/hubitat-tuya-rgbw-bulb/main/Device/tuyaDevices/tuyaGenericBulbRGBW.groovy",
+			"required": true
+		}
+	]
+}
